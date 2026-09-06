@@ -35,7 +35,7 @@
   #define PRN_CODE_DEFAULT ""
 #endif
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.1.1"
 
 // ---------------- pins: XIAO ESP32-S3 Sense ----------------
 #define PIN_CAM_XCLK   10
@@ -248,13 +248,16 @@ static void mqttPoll() {
   tlsClient.setInsecure();               // LAN device, printer uses a self-signed cert
   mqtt.setServer(prnIp.c_str(), 8883);
   mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(16384);
+  // P2-series reports are ~19KB — buffer MUST exceed the largest report or nothing parses
+  mqtt.setBufferSize(32768);
+  mqtt.setKeepAlive(30);
   String cid = String(devName) + "-" + String((uint32_t)(ESP.getEfuseMac() & 0xFFFF), HEX);
   bool ok = mqtt.connect(cid.c_str(), "bblp", prnCode.c_str());
   blog("mqtt %s connect %s (state=%d)", prnIp.c_str(), ok ? "OK" : "FAIL", mqtt.state());
   if (ok) {
     String repTopic = "device/" + prnSerial + "/report";
-    mqtt.subscribe(repTopic.c_str());
+    bool subOk = mqtt.subscribe(repTopic.c_str());
+    blog("mqtt subscribed %s: %s", repTopic.c_str(), subOk ? "OK" : "FAIL");
     lastReport.clear();
   }
 }
@@ -442,6 +445,27 @@ static void setupRoutes() {
   server.on("/reboot", HTTP_POST, []() {
     server.send(200, "text/plain", "rebooting");
     rebootPending = true; rebootAt = millis() + 800;
+  });
+
+  server.on("/cmd", HTTP_POST, []() {
+    // raw command passthrough: body is JSON published to device/<serial>/request
+    String body = server.arg("plain");
+    if (!mqttEnabled || !mqtt.connected()) { server.send(503, "text/plain", "mqtt not connected"); return; }
+    if (!body.length() || body.length() > 16000) { server.send(400, "text/plain", "bad body"); return; }
+    String reqTopic = "device/" + prnSerial + "/request";
+    bool ok = mqtt.publish(reqTopic.c_str(), body.c_str());
+    blog("cmd -> %s: %s", reqTopic.c_str(), ok ? "sent" : "FAIL");
+    server.send(ok ? 200 : 500, "text/plain", ok ? "sent" : "publish failed");
+  });
+
+  server.on("/light", HTTP_GET, []() {
+    String state = server.hasArg("set") ? server.arg("set") : String("");
+    if (!mqttEnabled || !mqtt.connected()) { server.send(503, "text/plain", "mqtt not connected"); return; }
+    if (state != "on" && state != "off") { server.send(400, "text/plain", "?set=on|off"); return; }
+    String reqTopic = "device/" + prnSerial + "/request";
+    String payload = "{\"system\":{\"command\":\"ledctrl\",\"led_node\":\"chamber_light\",\"led_mode\":\"" + state + "\",\"led_on_time\":500,\"led_off_time\":500,\"loop_times\":0,\"interval_time\":0}}";
+    bool ok = mqtt.publish(reqTopic.c_str(), payload.c_str());
+    server.send(ok ? 200 : 500, "text/plain", "chamber light " + state + (ok ? "" : " (publish failed)"));
   });
 
   server.onNotFound([]() { server.send(404, "text/plain", "nope"); });
