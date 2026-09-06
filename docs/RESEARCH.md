@@ -30,6 +30,31 @@ Compiled from GitHub + the web (SearXNG) on project kickoff.
 ### What does NOT exist (our gap)
 - **Nobody has built the ESP32 dongle**: a single USB-plugged device that is simultaneously (a) the printer's USB stick, (b) the MQTT/FTPS bridge, (c) an independent bed camera, and (d) OTA-updatable. That's BambooSense. Good YouTube.
 
+## LIVE FINDINGS — P2S on 2026 firmware (probed 2026-09-06, dongle + Python)
+
+Empirically verified against P2D2 (P2S, fw with vsftpd 3.0.5, serial CN certs):
+
+| Layer | Result |
+|---|---|
+| MQTT connect (no client cert) | ✅ accepted — TLS handshake requests a cert but proceeds without one |
+| MQTT subscribe `/report` | ✅ works — full ~19KB telemetry every second |
+| MQTT publish `system.*` (ledctrl) | ✅ **works unsigned** — chamber light responds |
+| MQTT publish `print.*` (print_speed) | ❌ `result:failed, reason:"mqtt message verify failed", err_code:0x05024007` — **signed envelope required** |
+| FTPS :990 login (bblp+code, no cert) | ✅ login OK, PBSZ/PROT P OK |
+| FTPS write (STOR anywhere) | ❌ `553 Could not create file` — server sends TLS `Request CERT`; writes gated on client cert |
+| FTPS read/list | root LIST returns empty (restricted session) |
+
+### The signed-envelope scheme (OpenBambuAPI cloud-x509-auth.md)
+- `print.*` commands need a `header` envelope: RSA-SHA256 over canonical JSON (`sort_keys`, no whitespace, wrapped as `{"print":...}`), base64 `sign_string` + `cert_id` (leaf serial + CN) + `payload_len`.
+- Requires a **per-printer client cert+key** (CN = printer serial, chains to BBL CA, ~10yr validity). Also needed for FTPS writes and `gcode_line`'s extra `param_enc` (RSA-encrypt gcode with the printer's own pubkey from `cert_report`).
+- Cloud minting endpoint exists (`GET /v1/iot-service/api/user/applications/{appToken}/cert?aes256=...&ver=1`) but the appToken/AES-256 payload construction is proprietary — found in decompiled Bambu Connect (`Randomblock1/bambu_connect_disasm`, function wrapping `ac1()` → `{encAppKey, aes256}`), not yet replicated publicly.
+- Documented extraction: scan a **Linux** Bambu Studio network-plugin process memory for PEM markers after it connects to the printer.
+- Bambu Studio on this Mac: logs decrypt with the fixed plugin key `yyuBcftO2jkZeucy` (AES-128-ECB, `debug_network_*.log.enc`) — plugin v02.05.00.56, but no cert material on disk or in logs. macOS blocks process-memory scanning (SIP).
+
+### Bottom line for BambooSense
+- **Today, cert-free:** monitoring, lights, camera, OTA — done and running. Job submission via the **cloud API** (proven in fleet ops) fills the gap.
+- **Full local control needs the per-printer cert+key.** Three routes: (1) Linux Studio memory extraction (Docker x86_64 on Mac or Nick's PC), (2) replicate the Connect cert-minting crypto, (3) community-shared cert for our serial (none public — certs are per-printer).
+
 ## Firmware facts locked in during scaffold
 - Board: Seeed XIAO ESP32-S3 Sense — ESP32-S3R8 (8MB OPI PSRAM), 8MB flash, OV2640 on the expansion board, microSD on SPI.
 - Camera pins (Seeed wiki): XCLK 10, SIOD 40, SIOC 39, D0..D7 = 15,17,18,16,14,12,11,48, VSYNC 38, HREF 47, PCLK 13. microSD: CS 21, SCK 7, MOSI 8, MISO 9. Onboard LED shares GPIO21 with SD CS (flickers with SD traffic — cosmetic).
