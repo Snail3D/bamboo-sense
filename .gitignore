@@ -3,3 +3,4 @@ firmware/src/secrets.h
 *.bin
 .DS_Store
 crypto/mykey.pem
+firmware/src/testcerts.h

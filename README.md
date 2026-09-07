@@ -24,15 +24,16 @@ Built on the Seeed Studio **XIAO ESP32-S3 Sense** (ESP32-S3 + OV2640 camera + mi
 
 Bambu's official paths for agents are noisy: cloud API changes, the app's UI churn, carrier blocks on 8883, Jan-2025 firmware auth lockdown (later cracked with the extracted X.509 cert). BambooSense is the **steady pipe**: one cable for power + USB storage, one WiFi connection for control, its own camera that belongs to *us*, not to Bambu's firmware roadmap.
 
-## What it does (v0.1)
+## What it does (v0.2 — the signing vault)
 
 | Piece | Detail |
 |---|---|
-| **Fake USB stick** | TinyUSB MSC backed by the microSD card. Printer sees a U-disk. Push a sliced `.3mf` over HTTP → dongle remounts the drive → file appears on the printer. |
-| **Bed camera** | OV2640 pointed down through the top glass. `GET /snapshot` for the agent to judge *bed clear / print failed / spaghetti*. |
-| **MQTT bridge** | Dongle joins the printer's LAN broker (8883, `bblp` + access code) in **cloud mode** — status, progress, layer, pause/resume/stop, lights. Cached and served as JSON. |
-| **OTA** | `POST /ota` pushes new firmware over WiFi. After the first USB flash you never open the case again. |
-| **Zero-config setup** | No WiFi stored → it broadcasts its own AP; the Pi (or Mac) joins it and hands it credentials over HTTP. |
+| **Signed commands** | On-chip RSA identity (provisioned once via `POST /identity`), installed on the printer via `security.app_cert_install` (the crack — see `docs/CRACK.md`). `POST /cmd` takes plain JSON, signs it, publishes, waits for the printer's ack. **Verified: `result: SUCCESS` from Bambu firmware.** |
+| **Bed camera** | OV2640 pointed down through the top glass. `GET /snapshot` / `/stream` — the agent's eyes: *bed clear / print failed / spaghetti*. |
+| **MQTT bridge** | Joins the printer's LAN broker (8883, `bblp` + access code) in **cloud mode** — full telemetry cached at `/printer`. |
+| **SSDP discovery** | `GET /discover` finds printers on the LAN; auto-binds when exactly one is found. |
+| **OTA** | `POST /ota` — the dongle has been flashed 3× already without a cable. |
+| **(retired) fake stick** | The USB-MSC trick still ships but is unnecessary now — files go over the wire instead. Keep an SD in it if you want a sneakernet path. |
 
 ## Endpoints
 
@@ -75,6 +76,6 @@ tools/provision_ap.sh bamboo-sense-XXXX "<home wifi ssid>" "<wifi password>"
 3. **Check at t+3min** (first layer = make or break), then at layer milestones, after high-risk features (bridges/overhangs from the slicer metadata), and on any progress stall.
 4. Camera says spaghetti? Agent stops the print over MQTT and tells you.
 
-Roadmap: FTPS upload relay (X.509) → MQTT `project_file` start-from-SD → risky-layer scheduling → one dongle per printer, fleet view → MCP server so any agent can drive it.
+Roadmap: FTPS upload relay (cert-gated writes — retest with our cert installed) → signed `project_file` start-from-printer-storage → risky-layer camera check-ins → one dongle per printer, fleet view → MCP server so any agent can drive it.
 
-See `docs/RESEARCH.md` for the full state-of-the-union on controlling Bambu printers in 2025+.
+See `docs/CRACK.md` for the signing crack and `docs/RESEARCH.md` for the full state-of-the-union on controlling Bambu printers in 2025+.
