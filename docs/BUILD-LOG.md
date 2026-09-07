@@ -29,6 +29,7 @@ esptool v5 uses dash-style flags (`write-flash`, `default-reset`), NOT underscor
 - esptool on Pi 5 with the XIAO in a **host** USB port works fine at 921600.
 
 ### Still to do
-- Insert microSD (FAT32) → fake USB stick goes live → MSC test.
-- Move dongle: Pi USB → printer front USB-C. Watch MQTT stays up (printer port power), grab first through-the-glass snapshot.
-- Phase 2: FTPS upload w/ X.509 cert + `project_file` start-from-SD (see RESEARCH.md).
+- ~~Insert microSD~~ — retired: no SD needed; files go over the wire (signed FTPS/project_file path).
+- ~~Move dongle: Pi USB → printer front USB-C~~ — **DONE 2026-09-06**: dongle lives in the printer's USB port, powered by the printer, MQTT live from inside the chamber, light control verified through the dongle. Camera mounted top-down on the glass (position tuneable).
+- ~~Signed print.* commands~~ — **DONE, verified**: `/cmd` → printer acks SUCCESS (v0.2.0, see CRACK.md).
+- Next: signed `project_file` (start prints through the dongle), FTPS write retest with our cert installed, check-in cadence loop (t+3min, risky layers, stall detection).

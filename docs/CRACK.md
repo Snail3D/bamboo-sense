@@ -59,3 +59,79 @@ Signed `print.*` = pause/resume/stop/speed AND `project_file` (start prints),
 `gcode_line` (live G-code, needs the extra param_enc step + printer_cert),
 AMS control, firmware-adjacent ops — all over LAN, cloud mode, no LAN-only mode,
 no Bambu account dependency at runtime. BambooSense dongle = the signing vault.
+
+---
+
+# PROJECT_FILE: starting actual prints (2026-09-08, P2S fw live-verified)
+
+The full start-a-print chain, every step verified on P3Pio (P2S, cloud mode):
+
+## 1. Command shape
+```json
+{"print":{"sequence_id":<int>,"command":"project_file","param":"Metadata/plate_1.gcode",
+  "url":"<URL>","md5":"<md5-of-THE-ENTIRE-3MF-FILE>","project_id":"0","profile_id":"0",
+  "task_id":"0","subtask_id":"0","use_ams":true,"ams_mapping":[<tray>],
+  "bed_leveling":true,"flow_cali":false,"vibration_cali":true,"layer_inspect":true,
+  "timelapse":false},"user_id":"<uid>"}
+```
+signed exactly like any print.* (header spliced before final `}` — see above).
+
+- `md5` = **md5 of the whole .3mf file**, NOT the `Metadata/plate_1.gcode.md5`
+  inside it. Wrong md5 ⇒ task dies in PREPARE with print_error 83902527
+  (0x0500403F), before any heating.
+- `ams_mapping` = list of AMS tray indices (0-3), one per filament in the plate.
+  `use_ams:false` ⇒ printer expects filament on the external spool holder; if
+  empty it fails mid-PREPARE with HMS_0300-0200 (filament ran out).
+- `url` works as **plaintext** — `url_enc` (RSA to printer_cert) is accepted but
+  NOT required on this firmware.
+
+## 2. THE BIG ONE: url can be a plain LAN http:// URL (cloud mode!)
+Cloud-mode (non-LAN-only) P2S happily fetches `http://<lan-ip>:<port>/file.3mf`.
+Verified: 18.7 MB sliced 3mf served by `python3 -m http.server`, printer did
+HEAD then GET, download ~seconds, print started, first layers went down.
+**This means: fully-local print start on a cloud-mode printer — no Bambu cloud
+file service, no LAN-only mode, no SD card.** A dongle that hosts the file over
+HTTP + signs the command = complete local pipeline.
+
+## 3. The trap: presigned S3 URLs are REJECTED
+`url = https://s3.../or-cloud-upload-prod/...?AWSAccessKeyId=..&Signature=..`
+(upload via cloud API `v1/iot-service/api/user/upload`, PUT 200 OK) ⇒ printer
+ACCEPTS the command (ACK SUCCESS), shows PREPARE, then fails ~75 s later with
+print_error 83902527, no heating, HMS_0100-0100 logged. Reproduced 3×.
+Hypothesis: firmware only fetches from allow-listed Bambu hosts (or https-only).
+If you see "ACK SUCCESS → PREPARE → FAILED 0x0500403F": it's the URL, not your
+signature, not the md5, not the AMS.
+
+## 4. State machine gotchas
+- `gcode_state` FINISH accepts new project_file. FAILED does NOT — any new
+  project_file ⇒ `{"result":"FAIL","reason":"ERROR STATE"}`.
+- The FAILED latch (incl. err print_error display) is only clearable on the
+  printer touchscreen (OK) or power cycle. Signed `stop` twice / `resume` do
+  NOT clear it. `stop` from FINISH is a no-op but returns SUCCESS.
+- Filament-runout FAIL (use_ams:false + empty external spool) also latches FAILED.
+- Signed `stop` during RUNNING works instantly (verified at 238 °C nozzle).
+
+## 5. Slicing for P2S via CLI (OrcaSlicer, no GUI)
+BambuStudio AND OrcaSlicer CLI **segfault** slicing P2S profiles out of the box:
+`extruder_variant_list: ["Direct Drive Standard,Direct Drive High Flow"]` (two
+comma-separated variants for ONE extruder) trips support_different_extruders()
+→ multi-extruder path → crash. Fix: collapse to a single variant in the machine
+profile. Also required: `from:"system"` (not "user") in every loaded profile,
+`compatible_printers` matching, `nozzle_volume_type` present.
+Working invocation:
+```
+OrcaSlicer --orient 1 --arrange 1 \
+  --load-settings "process.json;machine.json" --load-filaments "filament.json" \
+  --slice 0 --export-3mf out.gcode.3mf model.stl
+```
+
+## 6. Clearing errors remotely: `clean_print_error` (undocumented)
+`{"print":{"command":"clean_print_error","sequence_id":N}}` — signed like any
+print.* — is ACCEPTED by 2026 P2S firmware and **clears the HMS alarm list**
+(verified: HMS entry 0x10001 vanished after firing it). The FAILED-latched
+screen dialog: `gcode_state` stays FAILED as a sticky last-task-outcome field
+(same way FINISH persists) — the dialog and the state field are different
+things. Prints can START even while gcode_state reads FAILED (LAN-url
+project_file did — the earlier "ERROR STATE" refusals were tied to the S3-url
+attempts, not to the latch). `system.restart`/`reboot` over MQTT: silently
+ignored. If a modal truly remains on-screen, touch OK or power cycle.

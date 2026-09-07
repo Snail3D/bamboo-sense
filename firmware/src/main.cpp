@@ -55,7 +55,7 @@
   #define PRN_UID_DEFAULT ""
 #endif
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.2.2"
 
 // ---------------- pins (XIAO ESP32-S3 Sense) ----------------
 #define PIN_CAM_XCLK 10
@@ -106,6 +106,7 @@ static volatile int ackErr = -1;            // 0 = SUCCESS
 static char ackResult[24] = "";
 static long ackErrCode = -1;
 static uint32_t cmdSeq = 100000;             // our signed-command sequence space (persisted: anti-replay)
+static volatile bool pendingCertInstall = false;  // set from callback, serviced in mqttPoll
 
 // ---------------- log ring ----------------
 #define LOG_LINES 48
@@ -480,10 +481,15 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       prefs.begin("bsense", false); prefs.putBool("certinst", true); prefs.end();
       blog("cert: install confirmed by printer");
     }
-    if (msg.find("\"app_cert_list\"") != std::string::npos && idCertId.length() &&
-        msg.find(idCertId.c_str()) != std::string::npos) {
-      certInstalled = true;
-      prefs.begin("bsense", false); prefs.putBool("certinst", true); prefs.end();
+    if (msg.find("\"app_cert_list\"") != std::string::npos && idCertId.length()) {
+      if (msg.find(idCertId.c_str()) != std::string::npos) {
+        certInstalled = true;
+        prefs.begin("bsense", false); prefs.putBool("certinst", true); prefs.end();
+        blog("cert: confirmed installed on this printer");
+      } else if (idCert.length() > 100) {
+        blog("cert: NOT installed on this printer — queuing install");
+        pendingCertInstall = true;              // per-printer trust: install wherever we're pointed
+      }
     }
   }
 }
@@ -513,7 +519,11 @@ static void mqttPoll() {
   static uint32_t lastTry = 0;
   if (!mqttEnabled) return;
   if (WiFi.status() != WL_CONNECTED) return;
-  if (mqtt.connected()) { mqtt.loop(); return; }
+  if (mqtt.connected()) {
+    mqtt.loop();
+    if (pendingCertInstall) { pendingCertInstall = false; installCertOnPrinter(); }
+    return;
+  }
   if (millis() - lastTry < 5000) return;
   lastTry = millis();
   tlsClient.setInsecure();
@@ -529,6 +539,10 @@ static void mqttPoll() {
     bool subOk = mqtt.subscribe(repTopic.c_str());
     blog("mqtt subscribed %s: %s", repTopic.c_str(), subOk ? "OK" : "FAIL");
     lastReport.clear();
+    // per-printer trust check: ask THIS printer which app certs it holds
+    String list = "{\"security\":{\"sequence_id\":\"990003\",\"command\":\"app_cert_list\",\"timestamp\":" +
+                  String((unsigned long long)(epochMs())) + ",\"type\":\"app\"}}";
+    publishRaw(list);
     if (!certInstalled) installCertOnPrinter();
   }
 }
