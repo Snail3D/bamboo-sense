@@ -4,3 +4,4 @@ firmware/src/secrets.h
 .DS_Store
 crypto/mykey.pem
 firmware/src/testcerts.h
+.slapp/
