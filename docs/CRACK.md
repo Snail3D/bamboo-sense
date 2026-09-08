@@ -135,3 +135,28 @@ things. Prints can START even while gcode_state reads FAILED (LAN-url
 project_file did — the earlier "ERROR STATE" refusals were tied to the S3-url
 attempts, not to the latch). `system.restart`/`reboot` over MQTT: silently
 ignored. If a modal truly remains on-screen, touch OK or power cycle.
+
+## 7. app_cert_install gotcha: CRL issuer MUST match cert issuer (2026-09-08)
+Second dongle's cert was self-signed `CN=bamboo-sense2` while the CRL (baked
+into firmware + manual attempts) was issued by `CN=GLOF3813734089.bambulab.com`.
+Printer **silently dropped** every install (no security reply at all — worse
+than the explicit `FAILURE no crl` you get when omitting the CRL entirely).
+Fix: sign the dongle's cert WITH the GLOF CA key (the self-made issuer key),
+then the same known-good GLOF CRL validates and install confirms instantly
+("install confirmed by printer", cert_installed: true). Rule: issuer(cert) ==
+issuer(crl) or radio silence. Also: omitting CRL explicitly returns
+`{"result":"FAILURE","reason":"no crl"}` — so a REPLY means the CRL parsed, and
+SILENCE means it didn't. Useful error triage.
+
+## 8. P2S (N7-V2) TLS service map (all mTLS, same server cert CN=<serial>,
+##    issuer "BBL Device CA N7-V2")
+- :8883 MQTT (bblp/access code) — the main door (see above)
+- :990 FTPS — LIST works with creds; STOR 553 (still)
+- :6000 file tunnel — 64-byte auth ("bblp"+code) → 24b frame; LIST framing TBD
+- :322 RTSPS — RTSP/1.0 answers WITHOUT client cert (Basic auth bblp:code);
+  all stream paths 404 on 01.02.00.00 (RTSP server vestigial — video goes via
+  their "brtc" protocol, see ipcam.brtc_service in reports)
+- :3002 mystery TLS — silent to RTSP/HTTP/tunnel-auth; likely brtc media
+- :3000 TLS — silent to HTTP + tunnel-auth
+Signed print.* now VERIFIED on both printers (P3Pio via dongle1, P2D2 via
+dongle2 after issuer fix + printer power-cycle + fw update).
