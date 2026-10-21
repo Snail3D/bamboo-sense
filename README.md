@@ -63,6 +63,19 @@ pio run -e bench -t upload --upload-port /dev/cu.usbmodem*   # first flash over 
 tools/ota_push.sh bamboo-sense.local .pio/build/printer/firmware.bin   # every flash after
 ```
 
+## Diagnostic tools
+
+`tools/*.py` read device details from the environment — nothing is hardcoded, so
+the repo never carries a live printer's credentials:
+
+```bash
+export BAMBU_SERIAL=<printer serial>
+export BAMBU_IP=<printer LAN IP>
+export BAMBU_ACCESS_CODE=<LAN access code>
+export BAMBU_CERT_CN=<printer serial>   # only for the cert-forging probes
+python3 tools/mqtt_probe.py
+```
+
 First boot with no WiFi: it starts AP `bamboo-sense-XXXX`. From any laptop (or the Pi's WiFi dongle):
 
 ```bash

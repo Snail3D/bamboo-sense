@@ -1,6 +1,7 @@
+import os
 import ssl, time, json
 import paho.mqtt.client as mqttc
-SER="22E8AJ612200029"; IP="192.168.1.81"
+SER=os.environ.get("BAMBU_SERIAL",""); IP=os.environ.get("BAMBU_IP","")
 acks=[]
 def on_msg(c,u,m):
     try:
@@ -12,7 +13,7 @@ def on_msg(c,u,m):
     except Exception: pass
 c=mqttc.Client(client_id="cmdprobe", protocol=mqttc.MQTTv311)
 c.tls_set(cert_reqs=ssl.CERT_NONE); c.tls_insecure_set(True)
-c.username_pw_set("bblp","ac555123"); c.on_message=on_msg
+c.username_pw_set("bblp",os.environ.get("BAMBU_ACCESS_CODE","")); c.on_message=on_msg
 c.connect(IP,8883,keepalive=30); c.loop_start()
 c.subscribe(f"device/{SER}/report",0)
 time.sleep(2)

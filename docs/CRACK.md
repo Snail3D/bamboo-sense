@@ -11,7 +11,7 @@ command. We minted our own CA-issued identity and the printer accepted it.
    validates the chain, expiry, or issuer):
    ```
    openssl req -new -x509 -key mykey.pem -out mycert.pem -days 3650 \
-     -subj "/CN=GLOF3813734089.bambulab.com" -set_serial 0x5a5a...
+     -subj "/CN=<printer-serial>.bambulab.com" -set_serial 0x5a5a...
    ```
 2. **Install it on the printer** over plain MQTT (bblp + access code, port 8883,
    NO client cert needed):
@@ -138,7 +138,7 @@ ignored. If a modal truly remains on-screen, touch OK or power cycle.
 
 ## 7. app_cert_install gotcha: CRL issuer MUST match cert issuer (2026-09-08)
 Second dongle's cert was self-signed `CN=bamboo-sense2` while the CRL (baked
-into firmware + manual attempts) was issued by `CN=GLOF3813734089.bambulab.com`.
+into firmware + manual attempts) was issued by `CN=<printer-serial>.bambulab.com`.
 Printer **silently dropped** every install (no security reply at all — worse
 than the explicit `FAILURE no crl` you get when omitting the CRL entirely).
 Fix: sign the dongle's cert WITH the GLOF CA key (the self-made issuer key),

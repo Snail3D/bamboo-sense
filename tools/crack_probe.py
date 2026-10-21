@@ -1,16 +1,17 @@
+import os
 import ssl, time, json, base64
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 import paho.mqtt.client as mqttc
 
-SER="22E8AJ612200029"; IP="192.168.1.81"
+SER=os.environ.get("BAMBU_SERIAL",""); IP=os.environ.get("BAMBU_IP","")
 CERT=open("/tmp/bambu-api/blk2.pem").read()
 KEY=open("/tmp/bambu-api/blk1.pem","rb").read()
 CHAIN=CERT+open("/tmp/bambu-api/blk3.pem").read()+open("/tmp/bambu-api/blk4.pem").read()
 CRL=open("/tmp/bambu-api/dylib/crl.pem").read()
 leaf=x509.load_pem_x509_certificate(CERT.encode())
-cert_id = format(leaf.serial_number,'x').zfill(32) + "CN=GLOF3813734089-524a37c80000"
+cert_id = format(leaf.serial_number,'x').zfill(32) + "CN="+os.environ.get("BAMBU_CERT_CN","")+"-524a37c80000"
 key=serialization.load_pem_private_key(KEY,None)
 
 def sign_env(cmd_obj, top="print"):
@@ -32,7 +33,7 @@ def on_msg(c,u,m):
 c=mqttc.Client(client_id="crack1", protocol=mqttc.MQTTv311)
 ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
 ctx.load_cert_chain("/tmp/bambu-api/blk2.pem","/tmp/bambu-api/blk1.pem")
-c.tls_set_context(ctx); c.username_pw_set("bblp","ac555123"); c.on_message=on_msg
+c.tls_set_context(ctx); c.username_pw_set("bblp",os.environ.get("BAMBU_ACCESS_CODE","")); c.on_message=on_msg
 c.connect(IP,8883,keepalive=30); c.loop_start(); c.subscribe(f"device/{SER}/report",0)
 time.sleep(2)
 t=int(time.time()*1000)

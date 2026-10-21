@@ -2,9 +2,9 @@
 """Bambu LAN file tunnel client (port 6000) — LIST_INFO / FILE_UPLOAD / FILE_DEL.
 Auth: 64-byte packet: 'bblp\\0\\0\\0\\0' + access code zero-padded to 32 + 24 zero bytes.
 Framing: 16-byte LE header (payload_size, sequence, cmdtype, mtype) + JSON body."""
-import socket, ssl, struct, json, sys, time
+import os, socket, ssl, struct, json, sys, time
 
-AUTH_PKT = b"bblp\x00\x00\x00\x00" + b"cf972ede".ljust(32, b"\x00") + b"\x00" * 24
+AUTH_PKT = b"bblp\x00\x00\x00\x00" + os.environ.get("BAMBU_ACCESS_CODE","").encode().ljust(32, b"\x00") + b"\x00" * 24
 
 def frame(seq, cmdtype, mtype, body: bytes) -> bytes:
     return struct.pack("<IIII", len(body), seq, cmdtype, mtype) + body
@@ -84,8 +84,8 @@ def file_del(s, remote_path, seq=90):
         return {"timeout":True}
 
 if __name__=="__main__":
-    IP="192.168.1.154"
-    s=connect(IP,"cf972ede")
+    IP=os.environ.get("BAMBU_IP","")
+    s=connect(IP,os.environ.get("BAMBU_ACCESS_CODE",""))
     print("TLS+auth OK to",IP)
     print("== LIST_INFO / ==")
     for r in list_info(s,"/"): print(" ",r[1],json.dumps(r[2])[:300])
